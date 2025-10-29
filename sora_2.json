@@ -1,0 +1,33 @@
+{
+  "name": "generate_sora2_video",
+  "description": "Генерирует видео с аудио через официальный OpenAI Sora 2 API и возвращает ссылку для скачивания.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Текстовое описание сцены для генерации видео."
+      },
+      "openai_api_key": {
+        "type": "string",
+        "description": "Ваш секретный API-ключ OpenAI (требуется верифицированная организация)."
+      },
+      "model": {
+        "type": "string",
+        "enum": ["sora-2", "sora-2-pro"],
+        "description": "Версия модели: sora-2 (быстрая) или sora-2-pro (высокое качество)."
+      },
+      "duration_seconds": {
+        "type": "integer",
+        "description": "Длительность видео в секундах (от 1 до 10).",
+        "minimum": 1,
+        "maximum": 10
+      },
+      "has_audio": {
+        "type": "boolean",
+        "description": "Включать ли синхронизированный аудиотрек."
+      }
+    },
+    "required": ["prompt", "openai_api_key"]
+  }
+}
