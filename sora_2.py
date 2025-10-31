@@ -6,24 +6,11 @@ def generate_sora2_video(arguments):
     
     prompt = arguments['prompt']
     model = "sora-2"
-    duration_seconds = None
-    has_audio = False
     openai_api_key = None
     openai_organization = None
     
     if 'model' in arguments:
         model = arguments['model']
-    
-    # Примечание: duration_seconds пока не поддерживается API, но оставляем для будущего
-    if 'duration_seconds' in arguments:
-        duration_seconds = arguments['duration_seconds']
-        print("⚠️ ВНИМАНИЕ: Параметр duration_seconds пока не поддерживается Sora 2 API и будет проигнорирован")
-    
-    # Примечание: has_audio пока не поддерживается API, но оставляем для будущего
-    if 'has_audio' in arguments:
-        has_audio = arguments['has_audio']
-        if has_audio:
-            print("⚠️ ВНИМАНИЕ: Параметр has_audio пока не поддерживается Sora 2 API и будет проигнорирован")
     
     if 'openai_api_key' in arguments:
         openai_api_key = arguments['openai_api_key']
@@ -43,8 +30,6 @@ def generate_sora2_video(arguments):
     else:
         openai = OpenAI(api_key=openai_api_key)
     
-    # Текущая версия Sora 2 API поддерживает только model и prompt
-    # Параметры duration и audio пока не поддерживаются
     video = openai.videos.create(
         model=model,
         prompt=prompt,
@@ -81,12 +66,82 @@ def generate_sora2_video(arguments):
     
     content = openai.videos.download_content(video.id, variant="video")
     
+    # Получаем байты видео
+    # content может быть разных типов в зависимости от версии SDK OpenAI
     import tempfile
-    temp_dir = tempfile.gettempdir()
-    video_filename = f"video_{video.id}.mp4"
-    video_path = os.path.join(temp_dir, video_filename)
     
-    content.write_to_file(video_path)
-    print(f"Wrote {video_path}")
+    video_bytes = None
     
-    return video_path
+    # Пробуем разные способы получения байтов
+    try:
+        if isinstance(content, bytes):
+            video_bytes = content
+        elif hasattr(content, 'read'):
+            # Если это файлоподобный объект с методом read
+            if hasattr(content, 'seek'):
+                content.seek(0)
+            video_bytes = content.read()
+        elif hasattr(content, 'content'):
+            # Если это response объект
+            video_bytes = content.content
+        else:
+            # Если content имеет метод write_to_file, сохраняем во временный файл и читаем байты
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+            try:
+                content.write_to_file(temp_file.name)
+                with open(temp_file.name, 'rb') as f:
+                    video_bytes = f.read()
+            finally:
+                os.unlink(temp_file.name)
+    except Exception as e:
+        raise RuntimeError(f"Не удалось получить байты видео: {str(e)}")
+    
+    if video_bytes is None or len(video_bytes) == 0:
+        raise RuntimeError("Не удалось получить байты видео или файл пустой")
+    
+    print(f"Video size: {len(video_bytes) / 1024 / 1024:.2f} MB")
+    
+    print("Uploading video to temp.sh...")
+    
+    # Загружаем на temp.sh согласно документации
+    import requests
+    
+    video_filename = f"sora_video_{video.id}.mp4"
+    
+    try:
+        # Согласно документации temp.sh:
+        # POST запрос на https://temp.sh/upload
+        # files={"file": (filename, bytes, content_type)}
+        # Ответ: просто URL в тексте (не JSON!)
+        
+        response = requests.post(
+            "https://temp.sh/upload",
+            files={"file": (video_filename, video_bytes, "video/mp4")},
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            # temp.sh возвращает URL напрямую в тексте ответа
+            download_url = response.text.strip()
+            
+            # Проверяем, что это действительно URL
+            if download_url.startswith('http'):
+                print(f"✅ Video uploaded successfully to temp.sh!")
+                print(f"📥 Download link: {download_url}")
+                print("ℹ️  File will be automatically deleted after download")
+                return download_url
+            else:
+                raise RuntimeError(
+                    f"temp.sh returned unexpected response format. "
+                    f"Expected URL, got: {download_url[:200]}"
+                )
+        else:
+            raise RuntimeError(
+                f"Failed to upload file to temp.sh: HTTP {response.status_code} - {response.text[:500]}"
+            )
+    
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Network error while uploading to temp.sh: {str(e)}")
+    
+    except Exception as e:
+        raise RuntimeError(f"Failed to upload file to temp.sh: {str(e)}")
